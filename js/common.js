@@ -29,6 +29,15 @@
 
   // ---------------------------------------------------------------- 기본 설정
   const DEFAULT_ROUNDS = [
+    { situation: '아침에 알람 소리에 겨우 눈을 떴더니 천장에서…', parts: ['주어', '부사어', '서술어'] },
+    { situation: '밤 11시, 출출해서 동네 편의점에 갔다. 문을 여는 순간…', parts: ['주어', '목적어', '서술어'] },
+    { situation: '소원을 빌며 동전을 던지자 분수 속에서…', parts: ['관형어', '주어', '서술어'] },
+    { situation: '전국 요리 대회 결승전, 심사위원 앞에서 세계 최고의 요리사는…', parts: ['관형어', '목적어', '서술어'] },
+    { situation: '마법에 걸려 백 년 동안 잠들다가 깨어난 공주는…', parts: ['부사어', '목적어', '서술어'] },
+  ];
+
+  // 예전 기본 라운드. 브라우저에 이것이 그대로 저장돼 있으면 새 기본 라운드로 바꿔 준다.
+  const OLD_DEFAULT_ROUNDS = [
     { situation: '어느 평범한 월요일 아침, 냉장고 문을 열었더니…', parts: ['주어', '부사어', '서술어'] },
     { situation: '이 소식은 순식간에 퍼져 대통령의 귀에까지 들어갔다. 대통령은…', parts: ['목적어', '부사어', '서술어'] },
     { situation: '그날 밤, 하늘에서 거대한 그림자가 천천히 내려왔다. 그림자 속에서…', parts: ['관형어', '주어', '서술어'] },
@@ -36,11 +45,19 @@
     { situation: '그리고 다음 날 아침, 냉장고 문을 다시 열었더니…', parts: ['주어', '목적어', '서술어'] },
   ];
 
+  /** 채점 항목. 키(c, g, w)는 데이터베이스에 저장되는 이름이다. */
+  const CRITERIA = [
+    { key: 'c', max: 'maxContext', label: '상황', desc: '제시된 상황에 맞게 이어지는가' },
+    { key: 'g', max: 'maxGrammar', label: '구조', desc: '문장 구조와 성분 호응이 알맞은가' },
+    { key: 'w', max: 'maxWit', label: '재치', desc: '재치 있고 재미있는가' },
+  ];
+
   function defaultSettings() {
     return {
       timer: 60,          // 입력 제한시간(초)
-      maxGrammar: 5,      // 적격성 만점
-      maxContext: 5,      // 문맥 만점
+      maxContext: 5,      // 상황 만점: 제시된 상황에 맞는가
+      maxGrammar: 5,      // 구조 만점: 문장 구조·성분 호응이 알맞은가
+      maxWit: 5,          // 재치 만점
       rounds: JSON.parse(JSON.stringify(DEFAULT_ROUNDS)),
     };
   }
@@ -55,11 +72,14 @@
     };
     const out = {
       timer: num(s.timer, 10, 600, d.timer),
-      maxGrammar: num(s.maxGrammar, 0, 100, d.maxGrammar),
       maxContext: num(s.maxContext, 0, 100, d.maxContext),
+      maxGrammar: num(s.maxGrammar, 0, 100, d.maxGrammar),
+      maxWit: num(s.maxWit, 0, 100, d.maxWit),
       rounds: [],
     };
-    if (out.maxGrammar + out.maxContext === 0) { out.maxGrammar = d.maxGrammar; out.maxContext = d.maxContext; }
+    if (out.maxGrammar + out.maxContext + out.maxWit === 0) {
+      out.maxContext = d.maxContext; out.maxGrammar = d.maxGrammar; out.maxWit = d.maxWit;
+    }
     const rounds = toArray(s.rounds);
     for (const r of rounds) {
       if (!r) continue;
@@ -69,6 +89,17 @@
     }
     if (!out.rounds.length) out.rounds = d.rounds;
     return out;
+  }
+
+  /** 브라우저에 예전 기본 라운드가 그대로 저장돼 있으면 새 기본 라운드로 바꾼다(직접 고친 라운드는 그대로 둔다). */
+  function migrateSettings(s) {
+    s = sanitizeSettings(s);
+    if (JSON.stringify(s.rounds) === JSON.stringify(OLD_DEFAULT_ROUNDS)) s.rounds = JSON.parse(JSON.stringify(DEFAULT_ROUNDS));
+    return s;
+  }
+
+  function maxTotal(settings) {
+    return CRITERIA.reduce((sum, k) => sum + (Number(settings[k.max]) || 0), 0);
   }
 
   // ---------------------------------------------------------------- 작은 도구들
@@ -196,7 +227,7 @@
   // ---------------------------------------------------------------- 점수
   function roundScore(sc) {
     if (!sc) return 0;
-    return (Number(sc.g) || 0) + (Number(sc.c) || 0);
+    return (Number(sc.c) || 0) + (Number(sc.g) || 0) + (Number(sc.w) || 0);
   }
 
   /** 확정된 점수 합계. { tid: 합계 } */
@@ -279,6 +310,10 @@
     if (part === '서술어' && parts && parts.indexOf('보어') >= 0) {
       return ['되었다', '아니었다', '아니다'][Math.floor(Math.random() * 3)];
     }
+    if (part === '서술어' && parts && parts.indexOf('목적어') >= 0) {
+      const v = ['꺼냈다', '먹었다', '던졌다', '주문했다', '끓였다', '안아 주었다', '숨겼다'];
+      return v[Math.floor(Math.random() * v.length)];
+    }
     const list = BOT_WORDS[part] || ['무언가'];
     return list[Math.floor(Math.random() * list.length)];
   }
@@ -302,7 +337,7 @@
   const LIMITS = { name: 10, answer: 30 };
 
   Object.assign(SSG, {
-    PARTS, PART_NAMES, partHint, DEFAULT_ROUNDS, defaultSettings, sanitizeSettings,
+    PARTS, PART_NAMES, partHint, DEFAULT_ROUNDS, CRITERIA, defaultSettings, sanitizeSettings, migrateSettings, maxTotal,
     toArray, esc, randomId, roomCode, shuffle, normalizeDbUrl, isLikelyDbUrl,
     teamSizes, makeTeams, placeLatePlayer, rolesForTeam, rolesForRound,
     roundScore, totals, ranking, roundInfo, settingsOf, teamSentence, sentenceText, roundTeams,

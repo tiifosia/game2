@@ -98,9 +98,18 @@
       lines.push(t.no + '조: ' + pieces + '  →  "' + (full || '(전부 빈칸)') + '"');
     });
     lines.push('');
-    lines.push('[채점 기준]');
-    lines.push('1) grammar = 적격성 (0~' + input.maxGrammar + '점): 문장이 문법적으로 맞는가, 각 칸이 지정된 문장 성분 역할을 하는가(조사·어미까지 보고 판단). 빈칸은 그만큼 크게 깎고, 모두 빈칸이면 0점.');
-    lines.push('2) context = 문맥 (0~' + input.maxContext + '점): 제시된 [상황] 바로 뒤에 이어지는 문장으로 자연스러운가. 엉뚱해도 이야기가 이어지면 재치를 인정한다.');
+    if (input.parts.indexOf('주어') < 0) {
+      lines.push('※ 이번 문장 구조에는 주어 칸이 없다. 주어는 [상황]의 마지막 부분에 이미 나와 있으니, 상황 끝의 주어와 이어서 한 문장으로 읽고 판단한다.');
+      lines.push('');
+    }
+    lines.push('[채점 기준] 세 항목을 따로 매긴다.');
+    lines.push('1) context = 상황 (0~' + input.maxContext + '점): 제시된 [상황]에 맞게 자연스럽게 이어지는가. 상황 속 장소·인물·사건과 어울리는가.');
+    lines.push('2) grammar = 구조 (0~' + input.maxGrammar + '점): 문장 구조가 알맞은가. 각 칸이 지정된 문장 성분 역할을 하는가(조사·어미까지 확인), 성분끼리 호응하는가.');
+    lines.push('   - 목적어가 있으면 서술어가 목적어를 받는 말(먹다, 꺼내다 등)이어야 한다. 목적어가 없으면 서술어가 목적어 없이 쓰일 수 있어야 한다.');
+    lines.push('   - 관형어는 뒤의 명사를 꾸미는 꼴(-ㄴ, -는, -의 등)이어야 한다. 부사어는 서술어를 꾸며야 한다. 주어는 이/가(께서)가 자연스러워야 한다.');
+    lines.push('   - 주어와 서술어, 높임, 시제가 서로 어울리는가.');
+    lines.push('3) wit = 재치 (0~' + input.maxWit + '점): 엉뚱하지만 그럴듯한 조합, 예상을 뒤집는 반전, 웃음이 나는 표현인가. 평범하고 뻔하면 낮게.');
+    lines.push('- 빈칸이 있으면 세 항목 모두 그만큼 깎는다. 모두 빈칸이면 모두 0점.');
     lines.push('');
     lines.push('[채점 방법]');
     lines.push('- 모든 조의 문장을 서로 비교해서 상대적으로 평가한다. 더 나은 문장에 더 높은 점수를 주고, 점수가 한두 값에 몰리지 않도록 범위를 넓게 쓴다. 정말 비슷하면 동점도 괜찮다.');
@@ -113,7 +122,7 @@
     }
     lines.push('');
     lines.push('반드시 아래 JSON 형식으로만 답한다. 모든 조(' + input.teams.map(t => t.no).join(', ') + '조)를 빠짐없이 포함한다.');
-    lines.push('{"results":[{"team":조번호,"grammar":정수,"context":정수,"reason":"한 줄 이유"}]}');
+    lines.push('{"results":[{"team":조번호,"context":정수,"grammar":정수,"wit":정수,"reason":"한 줄 이유"}]}');
     return lines.join('\n');
   }
 
@@ -129,11 +138,12 @@
           type: 'OBJECT',
           properties: {
             team: { type: 'INTEGER' },
-            grammar: { type: 'INTEGER' },
             context: { type: 'INTEGER' },
+            grammar: { type: 'INTEGER' },
+            wit: { type: 'INTEGER' },
             reason: { type: 'STRING' },
           },
-          required: ['team', 'grammar', 'context', 'reason'],
+          required: ['team', 'context', 'grammar', 'wit', 'reason'],
         },
       },
     },
@@ -163,7 +173,7 @@
   }
 
   /** 한 라운드 채점.
-   * input: { situation, parts, teams:[{tid,no,pieces:[{part,text}]}], maxGrammar, maxContext, extra }
+   * input: { situation, parts, teams:[{tid,no,pieces:[{part,text}]}], maxContext, maxGrammar, maxWit, extra }
    * 결과: { model, items: { tid: {g, c, reason} }, missing: [tid...] } */
   async function scoreRound(input) {
     const model = getModel();
@@ -197,8 +207,9 @@
       const r = results.find(x => Number(x.team) === t.no || String(x.team).replace(/\D/g, '') === String(t.no));
       if (r) {
         items[t.tid] = {
-          g: clamp(r.grammar, input.maxGrammar),
           c: clamp(r.context, input.maxContext),
+          g: clamp(r.grammar, input.maxGrammar),
+          w: clamp(r.wit, input.maxWit),
           reason: String(r.reason || '').trim().slice(0, 80),
         };
       }

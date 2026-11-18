@@ -38,7 +38,7 @@
   const H = {
     hostId: 'h' + SSG.randomId(10),
     conn: savedConn() || defaultConn(),
-    settings: SSG.sanitizeSettings(LS.get(KEYS.settings, null)),
+    settings: SSG.migrateSettings(LS.get(KEYS.settings, null)),
     store: null,
     code: '',
     R: undefined,
@@ -275,7 +275,7 @@
     const aiRow = key && model
       ? `<div class="check ok">✅ <b>AI 채점</b> ${esc(model.replace('models/', ''))}</div>`
       : `<div class="check warn">✍️ <b>AI 채점</b> ${key ? '모델을 고르지 않았어요' : 'API 키가 없어요'} → 직접 채점만 할 수 있어요</div>`;
-    const rulesRow = `<div class="check ok">✅ <b>규칙</b> ${st.rounds.length}라운드 · 제한시간 ${st.timer}초 · 적격성 ${st.maxGrammar}점 + 문맥 ${st.maxContext}점</div>`;
+    const rulesRow = `<div class="check ok">✅ <b>규칙</b> ${st.rounds.length}라운드 · 제한시간 ${st.timer}초 · ${SSG.CRITERIA.map(k => k.label + ' ' + st[k.max] + '점').join(' + ')} = ${SSG.maxTotal(st)}점</div>`;
     $('#stage').innerHTML = `
       <section class="home">
         <div class="home-chips">
@@ -527,7 +527,7 @@
           <div class="scard-top">
             <span class="team-tag">${R.teams[tid].no}조</span>
             ${sc ? `<span class="score-badge">+${SSG.roundScore(sc)}</span>
-              <span class="score-detail">적격성 ${sc.g}/${S_.maxGrammar} · 문맥 ${sc.c}/${S_.maxContext}</span>` : ''}
+              <span class="score-detail">${SSG.CRITERIA.map(k => k.label + ' ' + (Number(sc[k.key]) || 0) + '/' + S_[k.max]).join(' · ')}</span>` : ''}
           </div>
           <div class="pieces">${piecesHtml(pieces)}</div>
           ${sc && sc.reason ? `<div class="scard-reason">💬 ${esc(sc.reason)}</div>` : ''}
@@ -585,8 +585,7 @@
         <tr data-tid="${tid}">
           <td class="st-team">${R.teams[tid].no}조</td>
           <td class="st-sent">${pieces.map(p => `<span class="w part-${partKey(p.part)} ${p.text ? '' : 'is-empty'}">${p.text ? esc(p.text) : '(빈칸)'}</span>`).join(' ')}</td>
-          <td><input class="num" type="number" inputmode="numeric" min="0" max="${S_.maxGrammar}" data-f="g" value="${v(e.g)}" ${loading ? 'disabled' : ''}></td>
-          <td><input class="num" type="number" inputmode="numeric" min="0" max="${S_.maxContext}" data-f="c" value="${v(e.c)}" ${loading ? 'disabled' : ''}></td>
+          ${SSG.CRITERIA.map(k => `<td><input class="num" type="number" inputmode="numeric" min="0" max="${S_[k.max]}" data-f="${k.key}" value="${v(e[k.key])}" ${loading ? 'disabled' : ''}></td>`).join('')}
           <td class="st-sum" data-sum>${SSG.roundScore(e)}</td>
           <td><input class="reason" type="text" maxlength="80" data-f="reason" value="${esc(e.reason || '')}" placeholder="한 줄 이유 (선택)" ${loading ? 'disabled' : ''}></td>
         </tr>`;
@@ -600,7 +599,7 @@
         </div>
         <div class="table-wrap" data-fit="list" data-n="${tids.length + 1}" data-h="2.75" data-max="0.016">
           <table class="score-table">
-            <thead><tr><th>조</th><th>문장</th><th>적격성<small>/${S_.maxGrammar}</small></th><th>문맥<small>/${S_.maxContext}</small></th><th>합계</th><th>한 줄 이유</th></tr></thead>
+            <thead><tr><th>조</th><th>문장</th>${SSG.CRITERIA.map(k => `<th title="${k.desc}">${k.label}<small>/${S_[k.max]}</small></th>`).join('')}<th>합계<small>/${SSG.maxTotal(S_)}</small></th><th>한 줄 이유</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -622,7 +621,7 @@
         H.edit.items[tid] = H.edit.items[tid] || {};
         if (f === 'reason') H.edit.items[tid].reason = e.target.value;
         else {
-          const max = f === 'g' ? S_.maxGrammar : S_.maxContext;
+          const max = S_[(SSG.CRITERIA.find(k => k.key === f) || {}).max] || 0;
           let v = e.target.value === '' ? '' : Math.round(Number(e.target.value));
           if (v !== '' && (!Number.isFinite(v) || v < 0)) v = 0;
           if (v !== '' && v > max) { v = max; e.target.value = max; }
@@ -801,8 +800,9 @@
       situation: info.situation,
       parts: info.parts,
       teams: SSG.roundTeams(R, r).map(tid => ({ tid, no: R.teams[tid].no, pieces: SSG.teamSentence(R, r, tid) })),
-      maxGrammar: S_.maxGrammar,
       maxContext: S_.maxContext,
+      maxGrammar: S_.maxGrammar,
+      maxWit: S_.maxWit,
       extra: LS.get(KEYS.extra, ''),
     };
   }
@@ -844,7 +844,7 @@
     const int = (v, max) => { v = Math.round(Number(v)); return Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : 0; };
     SSG.roundTeams(R, r).forEach(tid => {
       const e = (H.edit && H.edit.items[tid]) || {};
-      items[tid] = { g: int(e.g, S_.maxGrammar), c: int(e.c, S_.maxContext), reason: String(e.reason || '').trim().slice(0, 80) };
+      items[tid] = { c: int(e.c, S_.maxContext), g: int(e.g, S_.maxGrammar), w: int(e.w, S_.maxWit), reason: String(e.reason || '').trim().slice(0, 80) };
     });
     await update({ ['scores/r' + r]: items, 'state/phase': 'scored' });
     beep(784, 0.2);
@@ -1099,8 +1099,9 @@
             <h3>3. 게임 규칙</h3>
             <div class="row rules">
               <label>제한시간 <input id="setTimer" type="number" min="10" max="600" value="${st.timer}"> 초</label>
-              <label>적격성 만점 <input id="setMaxG" type="number" min="0" max="100" value="${st.maxGrammar}"> 점</label>
-              <label>문맥 만점 <input id="setMaxC" type="number" min="0" max="100" value="${st.maxContext}"> 점</label>
+              <label title="제시된 상황에 맞게 이어지는가">상황 만점 <input id="setMaxC" type="number" min="0" max="100" value="${st.maxContext}"> 점</label>
+              <label title="문장 구조와 성분 호응이 알맞은가">구조 만점 <input id="setMaxG" type="number" min="0" max="100" value="${st.maxGrammar}"> 점</label>
+              <label title="재치 있고 재미있는가">재치 만점 <input id="setMaxW" type="number" min="0" max="100" value="${st.maxWit}"> 점</label>
             </div>
           </section>
 
@@ -1185,7 +1186,7 @@
     const payload = {
       v: 1,
       conn: { mode, db: mode === 'firebase' ? SSG.normalizeDbUrl($('#setDb').value) : '' },
-      settings: SSG.sanitizeSettings({ timer: $('#setTimer').value, maxGrammar: $('#setMaxG').value, maxContext: $('#setMaxC').value, rounds: draftRounds }),
+      settings: SSG.sanitizeSettings({ timer: $('#setTimer').value, maxContext: $('#setMaxC').value, maxGrammar: $('#setMaxG').value, maxWit: $('#setMaxW').value, rounds: draftRounds }),
       model: $('#setModel').value || '',
       extra: $('#setExtra').value.trim().slice(0, 300),
     };
@@ -1223,7 +1224,7 @@
       LS.set(KEYS.conn, H.conn);
     }
     if (data.settings) {
-      H.settings = SSG.sanitizeSettings(data.settings);
+      H.settings = SSG.migrateSettings(data.settings);
       LS.set(KEYS.settings, H.settings);
     }
     if (data.key) SSG.AI.setKey(String(data.key).trim());
@@ -1248,8 +1249,9 @@
     LS.set(KEYS.extra, $('#setExtra').value.trim().slice(0, 300));
     const settings = SSG.sanitizeSettings({
       timer: $('#setTimer').value,
-      maxGrammar: $('#setMaxG').value,
       maxContext: $('#setMaxC').value,
+      maxGrammar: $('#setMaxG').value,
+      maxWit: $('#setMaxW').value,
       rounds: draftRounds,
     });
     const dropped = draftRounds.length - settings.rounds.length;
