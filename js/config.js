@@ -7,5 +7,5 @@
  */
 window.SSG_CONFIG = {
   // 예: 'https://sentence-game-default-rtdb.asia-southeast1.firebasedatabase.app'
-  firebaseUrl: '',
+  firebaseUrl: 'https://game2-8c121-default-rtdb.asia-southeast1.firebasedatabase.app',
 };
