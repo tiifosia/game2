@@ -52,7 +52,7 @@
     peopleHtml: '',
     seenNames: new Set(),
     flags: {},
-    allSince: {},
+    allDoneBeep: '',
     botTimers: new Map(),
     edit: null,
     aiRunning: false,
@@ -130,7 +130,7 @@
     H.store = null; H.unsub = null; H.R = undefined; H.code = ''; H.sig = '';
     H.botTimers.forEach(t => clearTimeout(t));
     H.botTimers.clear();
-    H.flags = {}; H.allSince = {}; H.edit = null;
+    H.flags = {}; H.edit = null;
     H.busy = false; H.aiRunning = false; H.tbHtml = ''; H.tbRight = ''; H.peopleHtml = ''; H.seenNames = new Set();
   }
 
@@ -449,7 +449,7 @@
         <div class="progress" id="progress"></div>
         <div class="stage-actions">
           <button class="btn" data-act="extend">⏱ +15초</button>
-          <button class="btn" data-act="closeNow">지금 마감</button>
+          <button class="btn" id="closeNowBtn" data-act="closeNow">지금 마감</button>
         </div>
       </section>`;
   }
@@ -472,10 +472,6 @@
     return { done, total, perTeam };
   }
 
-  function allSubmitted(R, r) {
-    const c = submittedCount(R, r);
-    return c.total > 0 && c.done >= c.total;
-  }
 
   /** 대기실 이름 목록. 새로 들어온 사람만 튀어나오게 한다. */
   function updateLobby(R) {
@@ -505,7 +501,18 @@
       if (prog) {
         const c = submittedCount(R, st.round);
         const tids = Object.keys(c.perTeam).sort((a, b) => R.teams[a].no - R.teams[b].no);
-        prog.innerHTML = `<div class="progress-total">제출 <b>${c.done}</b> / ${c.total}</div>
+        const all = c.total > 0 && c.done >= c.total;
+        // 모두 제출하면 [지금 마감]을 주 버튼으로 바꿔 진행자가(리모컨으로도) 바로 넘길 수 있게
+        const btn = $('#closeNowBtn');
+        if (btn && btn.classList.contains('btn-primary') !== all) {
+          btn.classList.toggle('btn-primary', all);
+          btn.classList.toggle('btn-lg', all);
+          btn.textContent = all ? '모두 제출! 지금 마감 ▶' : '지금 마감';
+          if (all) btn.setAttribute('data-primary', ''); else btn.removeAttribute('data-primary');
+          const doneKey = R.meta.created + ':' + st.round;
+          if (all && H.allDoneBeep !== doneKey) { H.allDoneBeep = doneKey; beep(880, 0.12); setTimeout(() => beep(1175, 0.18), 140); }
+        }
+        prog.innerHTML = `<div class="progress-total">${all ? '✅ 모두 제출했어요 · ' : ''}제출 <b>${c.done}</b> / ${c.total}</div>
           <div class="progress-teams">${tids.map(tid => {
             const dots = c.perTeam[tid];
             const full = dots.every(d => d !== 0);
@@ -948,16 +955,11 @@
     if (st.phase === 'input') {
       const r = st.round;
       const flag = R.meta.created + ':close:' + r;
-      if (!H.flags[flag]) {
-        const t = now();
-        const all = allSubmitted(R, r);
-        if (all && !H.allSince[flag]) H.allSince[flag] = t;
-        if (!all) H.allSince[flag] = 0;
-        // 마감 직전 자동 제출을 받으려고 0.8초 더 기다린다. 전원 제출이면 1.2초 뒤 마감.
-        if (t >= st.deadline + 800 || (all && t - H.allSince[flag] > 1200)) {
-          H.flags[flag] = true;
-          closeInput().catch(e => { H.flags[flag] = false; toast(e.message, 'error'); });
-        }
+      // 전원이 제출해도 저절로 넘어가지 않는다. 제한시간이 끝나면 마감하고, 그 전에는 진행자가 [지금 마감]으로 넘긴다.
+      // 마감 직전 자동 제출을 받으려고 0.8초 더 기다린다.
+      if (!H.flags[flag] && now() >= st.deadline + 800) {
+        H.flags[flag] = true;
+        closeInput().catch(e => { H.flags[flag] = false; toast(e.message, 'error'); });
       }
       scheduleBots(R, r);
     }

@@ -214,6 +214,7 @@
             <h2>제출 완료!</h2>
             <p>이제 앞 화면을 봐 주세요 👀</p>
             <div class="p-done">${mine}</div>
+            <p class="p-wait">시간이 끝나거나 진행자가 마감하면 다 같이 공개돼요.<br>그 전까지는 고칠 수 있어요.</p>
             <button class="btn btn-ghost" id="editBtn" type="button">다시 고치기</button>
           </div>`, () => {
           $('#editBtn').addEventListener('click', () => { P.editing = true; P.sig = ''; render(); });
@@ -242,6 +243,13 @@
           <button class="btn btn-primary btn-block" type="submit" id="sendBtn">제출하기</button>
         </form>`, () => {
         $('#ansForm').addEventListener('submit', (e) => { e.preventDefault(); submit(false); });
+        // 칸이 두 개 이상일 때(2명 조) 엔터를 누르면 다음 빈칸으로 이동하고, 마지막 칸에서만 제출한다.
+        $('#ansForm').addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' || e.isComposing || e.target.tagName !== 'INPUT') return;
+          const inputs = Array.from(document.querySelectorAll('#ansForm input[data-slot]'));
+          const next = inputs.slice(inputs.indexOf(e.target) + 1).find(i => !i.value.trim());
+          if (next) { e.preventDefault(); next.focus(); }
+        });
         const first = document.querySelector('#ansForm input');
         if (first && !first.value) setTimeout(() => first.focus(), 80);
         tick();
@@ -323,9 +331,11 @@
       el.textContent = left > 0 ? `⏱ ${sec}초` : '⏱ 마감!';
       el.classList.toggle('urgent', sec <= 10);
     }
-    // 마감 1초 전, 써 놓고 안 낸 내용이 있으면 자동 제출(진행자가 시간을 늘리면 새 마감에 맞춰 다시)
+    // 마감 1.2초 전부터, 써 놓고 안 낸 내용이 있으면 자동 제출(진행자가 시간을 늘리면 새 마감에 맞춰 다시).
+    // 폰이 느려 타이머가 늦게 돌아도 놓치지 않게, 진행자가 실제로 마감하기 전(마감 뒤 0.8초)까지는 보낸다.
+    const raw = (R.state.deadline || 0) - P.store.now();
     const key = (R.meta && R.meta.created) + ':' + R.state.round + ':' + R.state.deadline;
-    if (left > 0 && left < 1200 && P.autoSent !== key && document.querySelector('#ansForm')) {
+    if (raw < 1200 && raw > -700 && P.autoSent !== key && document.querySelector('#ansForm')) {
       const has = Array.from(document.querySelectorAll('#ansForm input[data-slot]')).some(i => i.value.trim());
       if (has) { P.autoSent = key; submit(true); }
     }
