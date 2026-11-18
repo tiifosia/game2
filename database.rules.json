@@ -1,0 +1,34 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".read": "$room.matches(/^[A-Z]{4}$/)",
+        ".write": "$room.matches(/^[A-Z]{4}$/)",
+        "players": {
+          "$pid": {
+            ".validate": "newData.hasChild('name') && $pid.length <= 40",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20" },
+            "joined": { ".validate": "newData.isNumber()" },
+            "bot": { ".validate": "newData.isBoolean()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "answers": {
+          "$round": {
+            "$team": {
+              "$slot": {
+                ".validate": "newData.hasChild('text') && root.child('rooms').child($room).child('state/phase').val() === 'input'",
+                "text": { ".validate": "newData.isString() && newData.val().length <= 60" },
+                "pid": { ".validate": "newData.isString() && newData.val().length <= 40" },
+                "at": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

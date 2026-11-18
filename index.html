@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>문장 성분 조합 게임 · 진행 화면</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;700;900&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="host" data-view="home">
+  <!-- 진행 중일 때 위쪽 작은 도구 막대 -->
+  <header id="topbar" class="topbar" hidden></header>
+
+  <!-- 메인 무대 -->
+  <main id="stage" class="stage"></main>
+
+  <!-- 다른 창에서 진행 중일 때 -->
+  <div id="passive" class="overlay" hidden>
+    <div class="modal modal-small">
+      <h2>다른 창에서 진행 중이에요</h2>
+      <p>이 방은 다른 브라우저 탭(또는 다른 컴퓨터)의 진행 화면이 맡고 있어요.<br>타이머와 봇이 두 번 돌지 않도록 한 화면에서만 진행해요.</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" data-act="takeover">이 창에서 진행하기</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="overlay" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="lib/qrcode.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/host.js"></script>
+</body>
+</html>
