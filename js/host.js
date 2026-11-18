@@ -404,7 +404,6 @@
     return `
       <section class="teams">
         <h1 class="stage-title">조 편성 완료!</h1>
-        <p class="stage-sub">같은 조끼리 모여서 이름과 TMI 하나씩 나눠 보세요 👋</p>
         <div class="team-grid" data-fit="grid" data-n="${tids.length}" data-w="16" data-h="6">
           ${tids.map((tid, i) => `
             <div class="team-card" style="--i:${i}">
