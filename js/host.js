@@ -18,9 +18,19 @@
     botBlank: 'ssg-bot-blank',
   };
 
+  /** js/config.js 에 적어 둔 사이트 기본 Firebase 주소 */
+  function configDb() {
+    const c = window.SSG_CONFIG || {};
+    return SSG.normalizeDbUrl(c.firebaseUrl || '');
+  }
+  function defaultConn() {
+    const db = configDb();
+    return db ? { mode: 'firebase', db } : { mode: '', db: '' };
+  }
+
   const H = {
     hostId: 'h' + SSG.randomId(10),
-    conn: LS.get(KEYS.conn, { mode: '', db: '' }),
+    conn: LS.get(KEYS.conn, null) || defaultConn(),
     settings: SSG.sanitizeSettings(LS.get(KEYS.settings, null)),
     store: null,
     code: '',
@@ -244,7 +254,7 @@
     if (conn.mode === 'firebase' && conn.db) {
       let host = conn.db;
       try { host = new URL(conn.db).host; } catch (e) { /* 그대로 */ }
-      connRow = `<div class="check ok">✅ <b>연결</b> Firebase · ${esc(host)}</div>`;
+      connRow = `<div class="check ok">✅ <b>연결</b> Firebase · ${esc(host)}${conn.db === configDb() ? ' <span class="muted">(사이트 기본 주소)</span>' : ''}</div>`;
     } else if (conn.mode === 'local') {
       connRow = `<div class="check warn">🧪 <b>연결</b> 로컬 테스트 모드 (이 브라우저의 탭끼리만 연결돼요)</div>`;
     } else {
@@ -1042,6 +1052,8 @@
                 <button class="btn btn-sm" data-act="testDb">연결 테스트</button>
               </div>
               <p class="result" id="dbResult"></p>
+              ${configDb() ? `<p class="muted small">사이트 기본 주소(js/config.js): ${esc(configDb())}
+                ${configDb() !== SSG.normalizeDbUrl(conn.db) ? '<button class="btn btn-xs" data-act="useConfigDb">기본 주소로</button>' : ''}</p>` : ''}
             </div>
             <label class="radio"><input type="radio" name="mode" value="local" ${conn.mode === 'local' ? 'checked' : ''}>
               <span><b>로컬 테스트 모드</b> — Firebase 없이 이 브라우저의 여러 탭으로 리허설해요. (다른 기기는 못 들어와요)</span></label>
@@ -1089,6 +1101,19 @@
             </div>
             ${H.store ? '<p class="muted small">저장하면 진행 중인 게임의 <b>다음 라운드부터</b> 바로 반영돼요. (이미 시작한 라운드는 그대로)</p>' : ''}
           </section>
+
+          <section>
+            <h3>5. 다른 기기로 설정 옮기기</h3>
+            <p class="muted small">링크를 복사해서 새 노트북에서 열면 위 설정(연결, AI 키·모델, 규칙, 라운드)이 한 번에 들어가요.
+              카카오톡 ‘나와의 채팅’이나 북마크에 넣어 두세요. 링크는 화면에 표시하지 않고 바로 복사만 해요.</p>
+            <label class="check-line"><input type="checkbox" id="linkKey" checked> Gemini API 키도 넣기
+              <span class="muted small">— 키가 든 링크는 다른 사람에게 보내지 마세요</span></label>
+            <div class="row">
+              <button class="btn btn-sm" data-act="copySetupLink">🔗 자동 설정 링크 복사</button>
+              <span class="muted small">지금 이 창에 입력한 값 그대로 담겨요(저장 전이어도 돼요).</span>
+            </div>
+            <p class="result" id="linkResult"></p>
+          </section>
         </div>
         <div class="modal-actions">
           <button class="btn" data-act="closeModal">취소</button>
@@ -1122,6 +1147,78 @@
         </div>
         <button class="btn btn-xs re-del" data-act="reDel" data-i="${i}" ${draftRounds.length <= 1 ? 'disabled' : ''}>삭제</button>
       </div>`).join('');
+  }
+
+  // ------------------------------------------------------------ 자동 설정 링크
+  // 링크 모양: 사이트주소#setup=<설정 JSON을 base64url로>
+  // '#' 뒤는 서버로 전송되지 않고 GitHub에도 올라가지 않는다. 열면 바로 주소창에서 지운다.
+  function b64urlEncode(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    const bin = atob(s);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  async function copySetupLink() {
+    const out = $('#linkResult');
+    const mode = ($('input[name=mode]:checked') || {}).value || '';
+    const payload = {
+      v: 1,
+      conn: { mode, db: mode === 'firebase' ? SSG.normalizeDbUrl($('#setDb').value) : '' },
+      settings: SSG.sanitizeSettings({ timer: $('#setTimer').value, maxGrammar: $('#setMaxG').value, maxContext: $('#setMaxC').value, rounds: draftRounds }),
+      model: $('#setModel').value || '',
+      extra: $('#setExtra').value.trim().slice(0, 300),
+    };
+    const key = $('#setKey').value.trim();
+    if ($('#linkKey').checked && key) payload.key = key;
+    const base = location.origin + location.pathname;
+    const link = base + '#setup=' + b64urlEncode(JSON.stringify(payload));
+    let copied = false;
+    try { await navigator.clipboard.writeText(link); copied = true; } catch (e) { /* 아래에서 다시 */ }
+    if (!copied) {
+      // 클립보드를 못 쓰는 환경: 직접 복사할 수 있게 창으로 보여 준다
+      prompt('아래 링크를 복사하세요 (Ctrl+C)', link);
+    }
+    out.className = 'result ok';
+    out.textContent = (copied ? '✅ 복사했어요. ' : '') + (payload.key ? 'API 키가 들어 있는 링크예요. 나만 보관하세요.' : 'API 키는 넣지 않았어요.') +
+      (location.protocol === 'file:' ? ' ⚠️ 지금은 내려받은 파일로 열어서, 이 링크는 이 컴퓨터에서만 열려요. 배포한 사이트 주소에서 다시 만들어 주세요.' : '');
+  }
+
+  /** 주소에 #setup=… 이 있으면 설정을 불러온다. */
+  function applySetupFromHash() {
+    const m = location.hash.match(/^#setup=([A-Za-z0-9_-]+)$/);
+    if (!m) return false;
+    // 키가 주소창·방문 기록에 남지 않게 바로 지운다
+    history.replaceState(null, '', location.pathname + location.search);
+    let data;
+    try { data = JSON.parse(b64urlDecode(m[1])); } catch (e) {
+      toast('자동 설정 링크가 잘못됐어요. 링크를 끝까지 복사했는지 확인해 주세요.', 'error', 6000);
+      return false;
+    }
+    const what = ['연결 방식', '규칙·라운드'];
+    if (data.key) what.push('Gemini API 키');
+    if (!confirm('자동 설정 링크로 이 브라우저의 설정을 바꿀까요?\n(' + what.join(', ') + ')')) return false;
+    if (data.conn && (data.conn.mode === 'firebase' || data.conn.mode === 'local')) {
+      H.conn = { mode: data.conn.mode, db: data.conn.mode === 'firebase' ? SSG.normalizeDbUrl(data.conn.db) : '' };
+      LS.set(KEYS.conn, H.conn);
+    }
+    if (data.settings) {
+      H.settings = SSG.sanitizeSettings(data.settings);
+      LS.set(KEYS.settings, H.settings);
+    }
+    if (data.key) SSG.AI.setKey(String(data.key).trim());
+    if (data.model) SSG.AI.setModel(String(data.model));
+    if (typeof data.extra === 'string') LS.set(KEYS.extra, data.extra.slice(0, 300));
+    toast('설정을 불러왔어요.' + (data.key ? '' : ' AI 키는 ⚙ 설정에서 넣어 주세요.'), '', 5000);
+    return true;
   }
 
   async function saveSettings() {
@@ -1229,6 +1326,11 @@
     testDb: () => testDb(),
     loadModels: () => loadModels(),
     pingAI: () => pingAI(),
+    useConfigDb: () => {
+      $('#setDb').value = configDb();
+      $('input[name=mode][value=firebase]').checked = true;
+    },
+    copySetupLink: () => copySetupLink(),
     toggleKey: (el) => { const i = $('#setKey'); i.type = i.type === 'password' ? 'text' : 'password'; el.textContent = i.type === 'password' ? '보기' : '숨기기'; },
     addRound: () => { draftRounds.push({ situation: '', parts: ['주어', '부사어', '서술어'] }); renderRoundsEditor(); },
     resetRounds: () => { if (confirm('라운드를 기본 5개로 되돌릴까요?')) { draftRounds = clone(SSG.DEFAULT_ROUNDS); renderRoundsEditor(); } },
@@ -1341,6 +1443,7 @@
 
   // ============================================================ 시작
   async function boot() {
+    applySetupFromHash();
     render();
     setInterval(() => { automate(); tickTimer(); }, 250);
     const ok = await resume();
