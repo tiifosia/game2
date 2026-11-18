@@ -23,6 +23,13 @@
     const c = window.SSG_CONFIG || {};
     return SSG.normalizeDbUrl(c.firebaseUrl || '');
   }
+  /** 이 브라우저에 저장된 연결. 비어 있거나 주소 없는 Firebase면 없는 것으로 본다. */
+  function savedConn() {
+    const c = LS.get(KEYS.conn, null);
+    if (!c || !c.mode) return null;
+    if (c.mode === 'firebase' && !SSG.normalizeDbUrl(c.db)) return null;
+    return c;
+  }
   function defaultConn() {
     const db = configDb();
     return db ? { mode: 'firebase', db } : { mode: '', db: '' };
@@ -30,7 +37,7 @@
 
   const H = {
     hostId: 'h' + SSG.randomId(10),
-    conn: LS.get(KEYS.conn, null) || defaultConn(),
+    conn: savedConn() || defaultConn(),
     settings: SSG.sanitizeSettings(LS.get(KEYS.settings, null)),
     store: null,
     code: '',
@@ -259,6 +266,11 @@
       connRow = `<div class="check warn">🧪 <b>연결</b> 로컬 테스트 모드 (이 브라우저의 탭끼리만 연결돼요)</div>`;
     } else {
       connRow = `<div class="check bad">⚠️ <b>연결</b> 아직 설정하지 않았어요 → ⚙ 설정</div>`;
+    }
+    // 이 브라우저에 예전 연결 설정이 남아 있어 사이트 기본 주소와 다르면 한 번에 바꿀 수 있게
+    if (configDb() && !(conn.mode === 'firebase' && SSG.normalizeDbUrl(conn.db) === configDb())) {
+      connRow += `<div class="check warn">💡 사이트 기본 Firebase 주소가 있어요: ${esc(new URL(configDb()).host)}
+        <button class="btn btn-xs" data-act="useConfigDbHome">기본 주소로 바꾸기</button></div>`;
     }
     const aiRow = key && model
       ? `<div class="check ok">✅ <b>AI 채점</b> ${esc(model.replace('models/', ''))}</div>`
@@ -1326,6 +1338,12 @@
     testDb: () => testDb(),
     loadModels: () => loadModels(),
     pingAI: () => pingAI(),
+    useConfigDbHome: () => {
+      H.conn = defaultConn();
+      LS.set(KEYS.conn, H.conn);
+      toast('사이트 기본 Firebase 주소로 바꿨어요.');
+      render();
+    },
     useConfigDb: () => {
       $('#setDb').value = configDb();
       $('input[name=mode][value=firebase]').checked = true;
