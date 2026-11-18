@@ -4,6 +4,7 @@
   const { esc, toArray, LS, LIMITS } = SSG;
   const $ = (s) => document.querySelector(s);
   const app = $('#app');
+  const partKey = (p) => (SSG.PARTS[p] ? SSG.PARTS[p].key : 'etc');
 
   const params = new URLSearchParams(location.search);
   const ROOM = (params.get('room') || '').trim().toUpperCase();
@@ -121,7 +122,7 @@
   async function join() {
     const R = P.R;
     const input = $('#nameInput');
-    const name = input.value.replace(/\s+/g, ' ').trim().slice(0, LIMITS.name);
+    const name = SSG.clip(input.value.replace(/\s+/g, ' ').trim(), LIMITS.name);
     if (!name) { P.joinMsg = '이름을 입력해 주세요.'; P.sig = ''; render(); return; }
     const pid = (P.me && P.me.pid) || ('p' + SSG.randomId(10));
     const taken = Object.keys(R.players || {}).some(id => id !== pid && (R.players[id].name || '').trim() === name);
@@ -205,7 +206,7 @@
       const ans = myAnswers(R, r, mt.tid);
       const done = slots.every(s => ans['s' + s] && ans['s' + s].text);
       if (done && !P.editing) {
-        const mine = slots.map(s => `<div class="p-done-item"><span class="chip part-${SSG.PARTS[info.parts[s]].key}">${esc(info.parts[s])}</span> ${esc(ans['s' + s].text)}</div>`).join('');
+        const mine = slots.map(s => `<div class="p-done-item"><span class="chip part-${partKey(info.parts[s])}">${esc(info.parts[s])}</span> ${esc(ans['s' + s].text)}</div>`).join('');
         return show('input-done|' + r + '|' + slots.map(s => ans['s' + s].text).join('|'), header(R, mt) + `
           <div class="p-timer" id="pTimer"></div>
           <div class="p-card p-center p-look">
@@ -219,12 +220,12 @@
           tick();
         });
       }
-      const chips = info.parts.map((p, s) => `<span class="chip part-${SSG.PARTS[p].key} ${slots.indexOf(s) >= 0 ? 'is-mine' : 'is-other'}">${slots.indexOf(s) >= 0 ? '✏️ ' : ''}${esc(p)}</span>`).join('<span class="plus">+</span>');
+      const chips = info.parts.map((p, s) => `<span class="chip part-${partKey(p)} ${slots.indexOf(s) >= 0 ? 'is-mine' : 'is-other'}">${slots.indexOf(s) >= 0 ? '✏️ ' : ''}${esc(p)}</span>`).join('<span class="plus">+</span>');
       const fields = slots.map(s => {
         const part = info.parts[s];
         const h = SSG.partHint(part, info.parts);
         const prev = ans['s' + s] ? ans['s' + s].text : '';
-        return `<div class="p-field part-${SSG.PARTS[part].key}">
+        return `<div class="p-field part-${partKey(part)}">
           <label class="p-field-label" for="ans${s}"><span class="p-part">${esc(part)}</span><span class="p-q">${esc(h.q)}</span></label>
           <p class="p-hint">${esc(h.desc)} · 예: ${esc(h.ex)}</p>
           <input class="p-input" id="ans${s}" data-slot="${s}" maxlength="${LIMITS.answer}" value="${esc(prev)}" placeholder="${esc(part)}를 써 주세요" autocomplete="off" enterkeyhint="send">
@@ -288,7 +289,7 @@
     const upd = {};
     let empty = false;
     inputs.forEach(inp => {
-      const text = inp.value.replace(/\s+/g, ' ').trim().slice(0, LIMITS.answer);
+      const text = SSG.clip(inp.value.replace(/\s+/g, ' ').trim(), LIMITS.answer);
       if (!text) { empty = true; return; }
       upd['answers/r' + r + '/' + mt.tid + '/s' + inp.dataset.slot] = { text, pid: P.me.pid, at: P.store.now() };
     });
@@ -322,8 +323,8 @@
       el.textContent = left > 0 ? `⏱ ${sec}초` : '⏱ 마감!';
       el.classList.toggle('urgent', sec <= 10);
     }
-    // 마감 1초 전, 써 놓고 안 낸 내용이 있으면 자동 제출
-    const key = R.meta.created + ':' + R.state.round;
+    // 마감 1초 전, 써 놓고 안 낸 내용이 있으면 자동 제출(진행자가 시간을 늘리면 새 마감에 맞춰 다시)
+    const key = (R.meta && R.meta.created) + ':' + R.state.round + ':' + R.state.deadline;
     if (left > 0 && left < 1200 && P.autoSent !== key && document.querySelector('#ansForm')) {
       const has = Array.from(document.querySelectorAll('#ansForm input[data-slot]')).some(i => i.value.trim());
       if (has) { P.autoSent = key; submit(true); }

@@ -203,8 +203,8 @@ body.host[data-view="home"] .stage { height: auto; min-height: 100vh; padding-to
 .name-chip {
   font-size: 1.45em; font-weight: 700; padding: .25em .8em;
   background: var(--card); border-radius: 999px;
-  animation: pop .3s ease-out both;
 }
+.name-chip.is-new { animation: pop .3s ease-out both; }
 
 /* 조 발표 */
 .teams .stage-title { margin-top: 1vh; }

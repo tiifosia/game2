@@ -136,6 +136,8 @@
       this._offRef = this.db.ref('.info/serverTimeOffset');
       this._offCb = this._offRef.on('value', s => { this.offset = Number(s.val()) || 0; });
       this.errorCbs = new Set();
+      this._connRef = null;
+      this._connCbs = [];
     }
     subscribe(cb) {
       const handler = this.ref.on('value', s => cb(s.val()), err => {
@@ -144,7 +146,9 @@
       return () => this.ref.off('value', handler);
     }
     onStatus(cb) {
-      this.db.ref('.info/connected').on('value', s => cb(!!s.val()));
+      this._connRef = this._connRef || this.db.ref('.info/connected');
+      const h = this._connRef.on('value', s => cb(!!s.val()));
+      this._connCbs.push(h);
     }
     onError(cb) { this.errorCbs.add(cb); }
     now() { return Date.now() + this.offset; }
@@ -153,7 +157,13 @@
       return this.ref.update(obj).catch(e => { throw new Error(friendlyFirebaseError(e)); });
     }
     removeRoom() { return this.ref.remove(); }
-    close() { this.ref.off(); this._offRef.off('value', this._offCb); }
+    close() {
+      this.ref.off();
+      this._offRef.off('value', this._offCb);
+      if (this._connRef) this._connCbs.forEach(h => this._connRef.off('value', h));
+      this._connCbs = [];
+      this.errorCbs.clear();
+    }
   }
 
   /** 저장소 연결. opts: { mode: 'local'|'firebase', db, room } */

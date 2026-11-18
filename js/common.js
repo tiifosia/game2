@@ -127,8 +127,16 @@
   function roomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // I, O 제외 (1, 0과 헷갈림)
     let s = '';
-    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    do {
+      s = '';
+      for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    } while (s === 'TEST'); // 설정의 [연결 테스트]가 쓰는 이름
     return s;
+  }
+
+  /** 이모지가 반으로 잘리지 않게 글자 단위로 자른다. */
+  function clip(str, n) {
+    return Array.from(String(str || '')).slice(0, n).join('');
   }
 
   function shuffle(arr, rand) {
@@ -338,7 +346,7 @@
 
   Object.assign(SSG, {
     PARTS, PART_NAMES, partHint, DEFAULT_ROUNDS, CRITERIA, defaultSettings, sanitizeSettings, migrateSettings, maxTotal,
-    toArray, esc, randomId, roomCode, shuffle, normalizeDbUrl, isLikelyDbUrl,
+    toArray, esc, randomId, roomCode, clip, shuffle, normalizeDbUrl, isLikelyDbUrl,
     teamSizes, makeTeams, placeLatePlayer, rolesForTeam, rolesForRound,
     roundScore, totals, ranking, roundInfo, settingsOf, teamSentence, sentenceText, roundTeams,
     BOT_WORDS, BOT_NAMES, botAnswer, LS, LIMITS,

@@ -46,6 +46,11 @@
     connected: true,
     sig: '',
     busy: false,
+    busySince: 0,
+    resuming: false,
+    tbHtml: '',
+    peopleHtml: '',
+    seenNames: new Set(),
     flags: {},
     allSince: {},
     botTimers: new Map(),
@@ -87,7 +92,10 @@
   }
 
   function now() { return H.store ? H.store.now() : Date.now(); }
-  function update(obj) { return H.store.update(obj); }
+  function update(obj) {
+    if (!H.store) return Promise.reject(new Error('게임에 연결되어 있지 않아요.'));
+    return H.store.update(obj);
+  }
   function S() { return SSG.settingsOf(H.R); }
   function isPassive() { return !!(H.R && H.R.meta && H.R.meta.host && H.R.meta.host !== H.hostId); }
   function playerName(pid) { const p = H.R && H.R.players && H.R.players[pid]; return p ? p.name : ''; }
@@ -123,6 +131,7 @@
     H.botTimers.forEach(t => clearTimeout(t));
     H.botTimers.clear();
     H.flags = {}; H.allSince = {}; H.edit = null;
+    H.busy = false; H.aiRunning = false; H.tbHtml = ''; H.tbRight = ''; H.peopleHtml = ''; H.seenNames = new Set();
   }
 
   async function attach(conn, code) {
@@ -225,7 +234,7 @@
 
   function renderTopbar() {
     const tb = $('#topbar');
-    if (!H.store || !H.R) { tb.hidden = true; return; }
+    if (!H.store || !H.R) { tb.hidden = true; H.tbHtml = ''; H.tbRight = ''; tb.innerHTML = ''; return; }
     tb.hidden = false;
     const R = H.R;
     const st = R.state || {};
@@ -233,23 +242,24 @@
     const nPlayers = Object.keys(R.players || {}).length;
     const roundTxt = (st.phase && st.phase !== 'lobby' && st.phase !== 'teams' && st.phase !== 'final')
       ? `<span class="tb-item">${(st.round || 0) + 1}/${total} 라운드</span>` : '';
-    tb.innerHTML = `
-      <div class="tb-left">
+    // 정보(왼쪽)와 버튼(오른쪽)을 따로 고친다: 인원수가 바뀌어도 버튼은 그대로 있어 클릭이 사라지지 않는다.
+    if (!tb.querySelector('.tb-left')) tb.innerHTML = '<div class="tb-left"></div><div class="tb-right"></div>';
+    const left = `
         <span class="tb-item">방 <b>${esc(H.code)}</b></span>
         ${H.store.mode === 'local' ? '<span class="tb-item tb-local">로컬 테스트</span>' : ''}
         ${roundTxt}
         <span class="tb-item">👥 ${nPlayers}명</span>
-        ${H.connected ? '' : '<span class="tb-item tb-bad">연결 끊김 · 다시 연결 중</span>'}
-      </div>
-      <div class="tb-right">
+        ${H.connected ? '' : '<span class="tb-item tb-bad">연결 끊김 · 다시 연결 중</span>'}`;
+    const right = `
         <button class="tb-btn" data-act="showQR" title="참가 QR 다시 보기">QR</button>
         <button class="tb-btn" data-act="openPeople" title="참가자 관리와 봇 추가">👥 참가자·봇</button>
         ${H.store.mode === 'local' ? '<button class="tb-btn" data-act="openPlayerTab" title="참가자 화면을 새 탭으로 열기">＋참가자 탭</button>' : ''}
         <button class="tb-btn" data-act="toggleSound" title="소리 켜기/끄기">${H.sound ? '🔊' : '🔇'}</button>
         <button class="tb-btn" data-act="fullscreen" title="전체 화면">⛶</button>
         <button class="tb-btn" data-act="openSettings" title="설정">⚙</button>
-        <button class="tb-btn" data-act="newGameConfirm">새 게임</button>
-      </div>`;
+        <button class="tb-btn" data-act="newGameConfirm">새 게임</button>`;
+    if (left !== H.tbHtml) { H.tbHtml = left; tb.querySelector('.tb-left').innerHTML = left; }
+    if (right !== H.tbRight) { H.tbRight = right; tb.querySelector('.tb-right').innerHTML = right; }
   }
 
   function renderHome() {
@@ -301,7 +311,7 @@
     const base = ph + '|' + r + '|' + JSON.stringify(SSG.settingsOf(R));
     const names = JSON.stringify(Object.keys(R.players || {}).map(k => k + R.players[k].name));
     switch (ph) {
-      case 'lobby': return base + names;
+      case 'lobby': return base; // 이름 목록은 updateLive에서 따로 고친다
       case 'teams': return base + JSON.stringify(R.teams || {}) + names;
       case 'input': return base + JSON.stringify(R.roles && R.roles['r' + r]) + JSON.stringify(R.teams || {}) + names;
       case 'reveal': return base + JSON.stringify(R.answers && R.answers['r' + r]) + JSON.stringify(R.teams || {}) + names;
@@ -387,12 +397,10 @@
         </div>
         <div class="lobby-right">
           <h1 class="lobby-title">문장 성분 조합 게임</h1>
-          <div class="lobby-count"><b>${players.length}</b>명 입장</div>
-          <div class="name-cloud">
-            ${players.length ? players.map(p => `<span class="name-chip">${esc(p.name)}</span>`).join('') : '<p class="muted">아직 아무도 없어요. QR코드를 찍어 주세요!</p>'}
-          </div>
+          <div class="lobby-count"><b id="lobbyCount">${players.length}</b>명 입장</div>
+          <div class="name-cloud" id="nameCloud"></div>
           <div class="stage-actions">
-            <button class="btn btn-primary btn-lg" data-act="formTeams" data-primary ${players.length ? '' : 'disabled'}>조 편성하기 ▶</button>
+            <button class="btn btn-primary btn-lg" id="formTeamsBtn" data-act="formTeams" data-primary ${players.length ? '' : 'disabled'}>조 편성하기 ▶</button>
           </div>
         </div>
       </section>`;
@@ -426,7 +434,7 @@
   function stageInput(R) {
     const st = R.state;
     const r = st.round;
-    const info = SSG.roundInfo(R, r);
+    const info = SSG.roundInfo(R, r) || { situation: '', parts: [] };
     const total = S().rounds.length;
     return `
       <section class="round">
@@ -469,9 +477,29 @@
     return c.total > 0 && c.done >= c.total;
   }
 
+  /** 대기실 이름 목록. 새로 들어온 사람만 튀어나오게 한다. */
+  function updateLobby(R) {
+    const cloud = $('#nameCloud');
+    if (!cloud) return;
+    const players = Object.keys(R.players || {}).map(pid => ({ pid, ...R.players[pid] }))
+      .sort((a, b) => (a.joined || 0) - (b.joined || 0));
+    const html = players.length
+      ? players.map(p => `<span class="name-chip ${H.seenNames.has(p.pid) ? '' : 'is-new'}">${esc(p.name)}</span>`).join('')
+      : '<p class="muted">아직 아무도 없어요. QR코드를 찍어 주세요!</p>';
+    const key = players.map(p => p.pid + ':' + p.name).join('|');
+    if (cloud.dataset.key !== key) {
+      cloud.dataset.key = key;
+      cloud.innerHTML = html;
+      players.forEach(p => H.seenNames.add(p.pid));
+    }
+    $('#lobbyCount').textContent = players.length;
+    $('#formTeamsBtn').disabled = !players.length;
+  }
+
   /** 다시 그리지 않고 바뀌는 부분(타이머, 제출 현황)만 고친다. */
   function updateLive(R) {
     const st = R.state || {};
+    if ((st.phase || 'lobby') === 'lobby') updateLobby(R);
     if (st.phase === 'input') {
       const prog = $('#progress');
       if (prog) {
@@ -558,8 +586,12 @@
     const d = (R.draft && R.draft['r' + r]) || {};
     if (H.edit && H.edit.round === r && H.edit.draftAt === d.at) return;
     let items;
-    if (H.edit && H.edit.round === r && d.status === 'done') items = d.items; // 새 AI 결과
-    else items = (R.scores && R.scores['r' + r]) || d.items || {};
+    if (H.edit && H.edit.round === r) {
+      // 새 AI 결과가 왔을 때만 덮어쓰고, 실패·진행 중에는 직접 넣은 값을 그대로 둔다
+      items = d.status === 'done' ? (d.items || {}) : H.edit.items;
+    } else {
+      items = (R.scores && R.scores['r' + r]) || d.items || {};
+    }
     H.edit = { round: r, draftAt: d.at, items: clone(items) || {} };
   }
 
@@ -813,18 +845,27 @@
       toast('설정에서 Gemini API 키와 모델을 먼저 넣어 주세요. 지금은 직접 채점할 수 있어요.', 'warn', 5000);
       return;
     }
-    H.aiRunning = true;
+    if (H.aiRunning) return;
+    const store = H.store;
     const input = aiInput(R, r);
-    await update({ 'state/phase': 'scoring', ['draft/r' + r]: { status: 'loading', at: now() } });
+    H.aiRunning = true;
+    try {
+      await update({ 'state/phase': 'scoring', ['draft/r' + r]: { status: 'loading', at: now() } });
+    } catch (e) {
+      H.aiRunning = false;
+      throw e;
+    }
     // AI 응답을 기다리는 동안에도 다른 버튼(전체 화면 등)이 막히지 않게 기다리지 않고 돌린다.
-    SSG.AI.scoreRound(input).then(res => {
+    // 결과는 채점을 시작한 방에만 쓴다. 그사이 [새 게임]을 눌렀다면 버린다.
+    const write = (draft) => {
+      if (H.store !== store) return Promise.resolve();
       H.aiRunning = false;
-      return update({ ['draft/r' + r]: { status: 'done', at: now(), model: res.model, items: res.items, missing: res.missing } });
-    }, e => {
-      H.aiRunning = false;
-      console.error(e);
-      return update({ ['draft/r' + r]: { status: 'error', at: now(), error: String(e.message || e).slice(0, 300) } });
-    }).catch(e => toast(e.message, 'error'));
+      return store.update({ ['draft/r' + r]: Object.assign({ at: store.now() }, draft) });
+    };
+    SSG.AI.scoreRound(input).then(
+      res => write({ status: 'done', model: res.model, items: res.items, missing: res.missing }),
+      e => { console.error(e); return write({ status: 'error', error: String(e.message || e).slice(0, 300) }); }
+    ).catch(e => { if (H.store === store) toast(e.message, 'error'); });
   }
 
   async function manualScore() {
@@ -860,13 +901,18 @@
     }
   }
 
-  async function removePlayer(pid) {
+  async function removePlayer(pid) { return removePlayers([pid]); }
+
+  /** 여러 사람을 한 번에 내보낸다(조원 목록도 같이 고친다). */
+  async function removePlayers(pids) {
     const R = H.R;
-    const upd = { ['players/' + pid]: null };
+    const gone = new Set(pids);
+    const upd = {};
+    pids.forEach(pid => { upd['players/' + pid] = null; });
     Object.keys(R.teams || {}).forEach(tid => {
       const m = toArray(R.teams[tid].members);
-      if (m.indexOf(pid) >= 0) {
-        const rest = m.filter(x => x !== pid);
+      if (m.some(x => gone.has(x))) {
+        const rest = m.filter(x => !gone.has(x));
         upd['teams/' + tid] = rest.length ? { no: R.teams[tid].no, members: rest } : null;
       }
     });
@@ -966,6 +1012,7 @@
   // ============================================================ 모달: QR, 참가자, 설정
   function openModal(name, html) {
     H.modal = name;
+    H.peopleHtml = '';
     const m = $('#modal');
     m.innerHTML = html;
     m.hidden = false;
@@ -1004,11 +1051,12 @@
       .sort((a, b) => (players[a].joined || 0) - (players[b].joined || 0));
     const body = $('#peopleBody');
     if (!body) return;
-    body.innerHTML = `
+    const html = `
       <div class="pp-count">입장 <b>${Object.keys(players).length}</b>명 (봇 ${Object.values(players).filter(p => p.bot).length}명)</div>
       ${teamBlocks}
       ${rest.length ? `<div class="pp-team"><b>${R.teams ? '조 배정 대기' : '입장한 사람'}</b> ${rest.map(pid => personChip(pid, players[pid])).join('')}</div>` : ''}
       ${!Object.keys(players).length ? '<p class="muted">아직 아무도 없어요.</p>' : ''}`;
+    if (html !== H.peopleHtml || !body.innerHTML) { H.peopleHtml = html; body.innerHTML = html; }
   }
 
   function personChip(pid, p) {
@@ -1325,7 +1373,10 @@
 
   // ============================================================ 버튼 처리
   const ACTIONS = {
-    newGame: () => createGame(),
+    newGame: () => {
+      if (H.resuming) { toast('이전 게임을 불러오는 중이에요. 잠시만요.', 'warn'); return; }
+      return createGame();
+    },
     newGameConfirm: () => {
       if (!confirm('지금 게임을 닫고 처음 화면으로 갈까요?\n(이 방의 기록은 남아 있어요. 다시 들어올 수는 없어요)')) return;
       LS.del(KEYS.room);
@@ -1390,8 +1441,7 @@
     removeBots: () => {
       const pids = Object.keys(H.R.players || {}).filter(pid => H.R.players[pid].bot);
       if (!pids.length) return;
-      // 한 번에 지우면 조 정보가 꼬일 수 있어 차례로 지운다
-      return pids.reduce((p, pid) => p.then(() => removePlayer(pid)), Promise.resolve());
+      return removePlayers(pids);
     },
     removePlayer: (el) => {
       const pid = el.dataset.pid;
@@ -1419,10 +1469,20 @@
     if (!fn) return;
     e.preventDefault();
     // 진행 버튼을 연달아 눌러도 한 번만 처리
-    const gameAct = el.closest('#stage') || el.closest('#passive');
+    const inStage = !!el.closest('#stage');
+    const gameAct = inStage || el.closest('#passive');
+    if (inStage && H.store && isPassive()) return; // 다른 창이 진행 중
     if (gameAct) {
-      if (H.busy) return;
+      if (H.busy) {
+        const waited = Date.now() - H.busySince;
+        // 앞 동작이 6초 넘게 안 끝나면(인터넷이 잠깐 끊긴 경우 등) 막지 않는다
+        if (waited < 6000) {
+          if (waited > 1500) toast('앞의 동작을 처리하는 중이에요. 인터넷 연결을 확인해 주세요.', 'warn');
+          return;
+        }
+      }
       H.busy = true;
+      H.busySince = Date.now();
     }
     try {
       await fn(el);
@@ -1453,6 +1513,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && H.modal) { closeModal(); return; }
     if (H.modal) return;
+    if (H.store && isPassive()) return; // 다른 창이 진행 중이면 리모컨으로 진행하지 않음
     const tag = (document.activeElement && document.activeElement.tagName) || '';
     if (/INPUT|TEXTAREA|SELECT|BUTTON/.test(tag)) return;
     if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) < 0) return;
@@ -1460,12 +1521,22 @@
     if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
   });
 
+  // 호스트 탭이 다른 탭 뒤에 숨어 있으면 브라우저가 타이머를 늦춘다.
+  // 다시 보이는 순간 밀린 일(마감, 늦은 입장, 화면 갱신)을 바로 처리한다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    automate();
+    if (H.store && H.R) render();
+  });
+
   // ============================================================ 시작
   async function boot() {
     applySetupFromHash();
     render();
     setInterval(() => { automate(); tickTimer(); }, 250);
-    const ok = await resume();
+    H.resuming = true;
+    let ok = false;
+    try { ok = await resume(); } finally { H.resuming = false; }
     if (!ok) render();
   }
 
